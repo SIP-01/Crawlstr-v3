@@ -53,6 +53,10 @@ SIP01_NSEC=nsec1... python -m sip01_node --config config.toml
 If `SIP01_NSEC` is unset the node generates an indexer key on first run and
 persists it in `<data_dir>/indexer.key` (mode `0600`). The nsec is never logged.
 
+Note: re-running the dry-run against the same `./data` directory crawls
+nothing — the 24h freshness cache suppresses recrawl. Delete `./data` to
+start fresh.
+
 **docker**:
 
 ```bash
@@ -114,7 +118,8 @@ python -m sip01_node [--config config.toml] [--source crawlstr/v3]
 ## Tests
 
 ```bash
-python -m pytest tests/        # unit + integration (integration skips offline)
+pip install -r requirements-dev.txt   # pytest
+python -m pytest tests/               # unit + integration (integration skips offline)
 ```
 
 ## License

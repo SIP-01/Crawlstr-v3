@@ -2,10 +2,12 @@
  * SIP-01 (Search Index Protocol) — Crawlstr publisher implementation.
  * Canonical spec: https://github.com/NostrDanish/SIP-01 (public/spec/SIP-01.md)
  *
- * Spec revision implemented: v1.2. The v1.2 revision audited NIP references
+ * Spec revision implemented: v1.3. The v1.2 revision audited NIP references
  * (NIP-33 folded into NIP-01; the `l` convention is NIP-32's, used here in the
- * bare two-letter form per §12.5) and added the §20 dependency table — the
- * wire format is unchanged and every v1/v1.1 event remains valid.
+ * bare two-letter form per §12.5) and added the §20 dependency table. v1.3
+ * added the optional capability-discovery extension tags `role` and `proto`
+ * (§9.2) — omitted from ordinary observations, so the wire format is unchanged
+ * and every existing event remains valid.
  *
  * Byte-compatible with the canonical reference port
  * (SIP-01 repo, src/lib/sip01-utils.ts), which is itself byte-compatible with:
@@ -153,6 +155,8 @@ export interface IndexObservationInput {
   network?: string;  // clearnet | tor | i2p (Crawlstr only ever emits clearnet)
   country?: string;  // ISO 3166-1 alpha-2
   mime?: string;     // document media type
+  role?: string;     // service-document role (spec v1.3): agent, tool, model, …
+  proto?: string;    // transport keyword (spec v1.3): mcp, http, contextvm, nostr, a2a
 }
 
 export interface UnsignedIndexEvent {
@@ -230,7 +234,7 @@ export async function buildIndexEvent(
 function extensionTags(input: IndexObservationInput): string[][] {
   const tags: string[][] = [];
 
-  for (const name of ['type', 'platform', 'category', 'network'] as const) {
+  for (const name of ['type', 'platform', 'category', 'network', 'role', 'proto'] as const) {
     const value = input[name]?.trim().toLowerCase();
     if (value && EXTENSION_VALUE_RE.test(value)) tags.push([name, value]);
   }
@@ -250,7 +254,7 @@ function extensionTags(input: IndexObservationInput): string[][] {
 /* Reader side (spec §18) — parse + verify inbound observations             */
 /* ------------------------------------------------------------------------ */
 
-const EXTENSION_TAG_NAMES = ['type', 'platform', 'category', 'network', 'country', 'mime'] as const;
+const EXTENSION_TAG_NAMES = ['type', 'platform', 'category', 'network', 'role', 'proto', 'country', 'mime'] as const;
 
 /** A parsed, validated observation (reader view of a kind 39697 event). */
 export interface IndexObservation {

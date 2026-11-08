@@ -2,7 +2,7 @@
 
 Crawlstr is a **browser-based web crawler** that publishes to the **shared SIP-01
 (Search Index Protocol) index** on Nostr. It implements the **canonical SIP-01
-specification v1.2** — [github.com/NostrDanish/SIP-01](https://github.com/NostrDanish/SIP-01)
+specification v1.3** — [github.com/NostrDanish/SIP-01](https://github.com/NostrDanish/SIP-01)
 (`public/spec/SIP-01.md`) — byte-compatibly with
 [0xSearchstr](https://github.com/NostrDanish/0xSearchstr),
 [0xPresearchstr](https://github.com/NostrDanish/0xPresearchstr),
@@ -15,6 +15,13 @@ specification v1.2** — [github.com/NostrDanish/SIP-01](https://github.com/Nost
 > us: addressable-kind semantics are now cited from NIP-01 (NIP-33 was folded
 > in), and the `l` tag convention is NIP-32's, used here in the bare two-letter
 > form per §12.5 — which is exactly what we emit.
+>
+> **v1.3 note:** that revision added the optional capability-discovery extension
+> tags `role`/`proto` (§9.2, ORBSTR) and allows a NIP-01 `a` tag pointing at a
+> companion kind 39698 capability announcement (§9.4/§21). The wire format is
+> unchanged — schema `v` stays `"1"`, and every existing event remains valid.
+> Crawlstr's builder accepts `role`/`proto` and emits them only when a caller
+> supplies them; ordinary page observations omit them.
 
 ## Protocol Compatibility
 
@@ -124,6 +131,8 @@ public metadata."*
 | `network` | always `clearnet` | A browser crawler can only reach the clearnet |
 | `type` | `page` / `repository` | `repository` for GitHub/GitLab hosts, else `page` |
 | `platform` | e.g. `github`, `youtube`, `wikipedia` | Emitted for well-known hosts only |
+| `role` | e.g. `tool`, `agent`, `model` | Optional (spec v1.3) — role of a service document; omitted from ordinary page observations |
+| `proto` | e.g. `mcp`, `http`, `contextvm` | Optional (spec v1.3) — transport keyword; omitted from ordinary page observations |
 
 **Key properties (same as all SIP-01 publishers):**
 
@@ -245,7 +254,7 @@ operators from spec §15 (`site:`, `title:`, `lang:`, `after:`, …):
 
 ## References
 
-- **Canonical spec (v1.1):** [NostrDanish/SIP-01](https://github.com/NostrDanish/SIP-01) — `public/spec/SIP-01.md`
+- **Canonical spec (v1.3):** [NostrDanish/SIP-01](https://github.com/NostrDanish/SIP-01) — `public/spec/SIP-01.md`
 - **Implementation guide:** [SIP-01/docs/IMPLEMENTATION-GUIDE.md](https://github.com/NostrDanish/SIP-01/blob/main/docs/IMPLEMENTATION-GUIDE.md)
 - **Reference port:** [SIP-01/src/lib/sip01-utils.ts](https://github.com/NostrDanish/SIP-01/blob/main/src/lib/sip01-utils.ts)
 - **0xSearchstr NIP.md:** [legacy schemas, community submissions, Nostra interop](https://github.com/NostrDanish/0xSearchstr/blob/main/NIP.md)

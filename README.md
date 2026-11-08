@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/NostrDanish/SIP-01"><img src="https://img.shields.io/badge/protocol-SIP--01%20v1.2-black" alt="SIP-01"></a>
+  <a href="https://github.com/NostrDanish/SIP-01"><img src="https://img.shields.io/badge/protocol-SIP--01%20v1.3-black" alt="SIP-01"></a>
   <img src="https://img.shields.io/badge/kind-39697-black" alt="kind 39697">
   <img src="https://img.shields.io/badge/license-MIT-black" alt="MIT">
   <img src="https://img.shields.io/badge/node-python%203.10%2B%20%C2%B7%20browser-black" alt="runtimes">
@@ -137,6 +137,7 @@ Source tags: v1 `crawlstr/1` · v2 `crawlstr/v2` · v3 `crawlstr/v3` — all val
 | **Crawlstr v3** (this) | Lightweight scout → SIP-01 publisher |
 | [Indexstr v3](https://github.com/SIP-01/indexstr-v3) | Distributed indexing network w/ curated collections + sharding |
 | [SIP-01](https://github.com/NostrDanish/SIP-01) | Canonical spec + explorer |
+| [ORBSTR](https://github.com/SIP-01/Orbstr) | Agent/tool directory — kind 39698 capability announcements; observations may carry `role`/`proto`/`a` (spec v1.3) |
 | [0xSearchstr](https://github.com/NostrDanish/0xSearchstr) · [0xPresearchstr](https://github.com/NostrDanish/0xPresearchstr) · [UNCAGED](https://github.com/NostrDanish/UNCAGED-ENGINE) | Search engines → SIP-01 readers |
 
 **Crawlstr finds. Indexstr maintains. Nostr distributes. Searchstr searches.**

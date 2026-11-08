@@ -27,6 +27,25 @@ This project is a Nostr client application built with React 19.x, TailwindCSS 4.
 
 **Always read an existing file before modifying it.** Never write over `App.tsx`, `AppRouter.tsx`, or `NostrProvider` without first reading their contents.
 
+## SIP-01 Crawler Architecture
+
+The crawler is the app's core — it lives in `src/crawler/` and is independent of the Nostr client scaffolding.
+
+- `engine.ts` — the crawl loop: admission gate (SSRF guard, traps, robots), fetch, parse, hash, publish. Serial by design (one in-flight request).
+- `queue.ts` — IndexedDB-backed persistent queue (priority + retry scheduling).
+- `seeds.ts` — Random Scout seed selection over the **user's saved link lists** (fresh/rare/category/stale/random strategies). Selection history is localStorage-only and never published. The app ships **no bundled seed corpora**.
+- `lists.ts` — user link lists + published capability listings (IndexedDB). `parseUrlList()` handles pasted text and uploaded files; lists are device-local and never leave the browser except as public observations.
+- `capability.ts` — canonical ORBSTR kind 39698 module (vendored byte-verbatim from `sip-01-core/src/discovery/capability.ts`). Do not fork the schema.
+- `webIndex.ts` — SIP-01 §5–§9 schema builder/parser. **Byte-compatible with the canonical spec** — schema `v` stays `"1"`; never change the wire format here without a spec revision.
+- `publisher.ts` — signing + relay fan-out for kinds 39697 (observations), 16919 (heartbeat), 39698 (capability listings). Capability fan-out is isolated from relay-health accounting: a relay may policy-reject 39698 without affecting observation delivery.
+- `relays.ts`, `meter.ts`, `robots.ts`, `traps.ts`, `indexerIdentity.ts` — relay pool, bandwidth meter, politeness, trap filters, per-device key.
+
+Invariants:
+
+- `role`/`proto` on observations are **emit-only-when-supplied** (spec v1.3 §9.2) — ordinary page observations must not gain new tags.
+- Imported lists and service submissions queue with `followLinks: false` — index exactly the URLs given, don't explode outward.
+- Tests: `npm test` (tsc + eslint + vitest + build). Crawler tests use `fake-indexeddb`; `src/test/setup.ts` wires jsdom's Storage into the global scope (Node 26 ships an experimental `localStorage` global that vitest's jsdom env does not override).
+
 ## UI Components
 
 Components in `@/components/ui` are unstyled, accessible primitives styled with Tailwind. They follow a consistent React 19 pattern: plain function components that type props via `React.ComponentProps<...>` and forward `ref` as a normal prop (no `React.forwardRef`), tag their root with a `data-slot` attribute, merge classes with the `cn()` utility, and define variants with `class-variance-authority`. Components built on Radix import from the unified `radix-ui` package (e.g. `import { Dialog as DialogPrimitive } from "radix-ui"`), not individual `@radix-ui/react-*` packages. When you need a specific component, list the directory (`ls src/components/ui/`) or import from `@/components/ui/<name>` — all common primitives are present (buttons, inputs, dialogs, dropdowns, forms, tables, etc.).

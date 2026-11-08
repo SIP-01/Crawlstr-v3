@@ -40,7 +40,7 @@ import { shouldCrawlUrl, getSitemaps, robotsUrlFor, hasCachedRules, warmRobots, 
 import { isPubliclyFetchable } from './safety';
 import { publishIndexObservation, publishHeartbeatEvent, flushObservationOutbox } from './publisher';
 import { buildHeartbeat, HEARTBEAT_INTERVAL_MS } from './heartbeat';
-import { pickRandomSeed, previewRandomSeed, commitSeed, pickRandomSeedBundle, SCOUT_BUNDLE_SIZE } from './seeds';
+import { pickRandomSeed, previewRandomSeed, commitSeed, pickRandomSeedBundle, SCOUT_BUNDLE_SIZE, refreshCorpus } from './seeds';
 import { bytesLastHour, pagesLastHour, recordPage, remainingBytesThisHour } from './meter';
 import { Scheduler } from './scheduler';
 import { nextFreshness, type FreshnessState } from './freshness';
@@ -349,14 +349,18 @@ export class CrawlerEngine {
     return true;
   }
 
-  async seedUrl(url: string, priority = 1.0): Promise<void> {
+  async seedUrl(
+    url: string,
+    priority = 1.0,
+    meta?: { role?: string; proto?: string; followLinks?: boolean },
+  ): Promise<boolean> {
     const normalizedUrl = normalizeIndexUrl(url);
-    if (!normalizedUrl) return;
+    if (!normalizedUrl) return false;
     if (!isPubliclyFetchable(normalizedUrl)) {
       console.debug('[Crawler] Refused non-public seed URL:', normalizedUrl);
       this.stats.ssrfBlocked++;
       this.emitStats();
-      return;
+      return false;
     }
     this.currentSeed = normalizedUrl;
     await addToQueue({
@@ -364,10 +368,65 @@ export class CrawlerEngine {
       priority,
       depth: 0,
       attempts: 0,
+      ...(meta?.role ? { role: meta.role } : {}),
+      ...(meta?.proto ? { proto: meta.proto } : {}),
+      ...(meta?.followLinks !== undefined ? { followLinks: meta.followLinks } : {}),
     });
     this.wake();
     this.stats.queueSize = await getQueueSize();
     this.emitStats();
+    return true;
+  }
+
+  /**
+   * Bulk-import URLs (a pasted list or an uploaded file) into the queue.
+   * Runs through the same admission gate as manual seeds (normalize → SSRF
+   * guard), chunked so the UI stays responsive. Imported lists default to
+   * `followLinks: false` — the list IS the crawl plan, index exactly these
+   * URLs instead of exploding outward. Service submissions pass role/proto
+   * so every observation of these URLs carries the capability tags.
+   */
+  async importUrls(
+    urls: string[],
+    opts: { role?: string; proto?: string; followLinks?: boolean } = {},
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<{ added: number; refused: number }> {
+    let added = 0;
+    let refused = 0;
+    const CHUNK = 500;
+
+    for (let i = 0; i < urls.length; i += CHUNK) {
+      for (const raw of urls.slice(i, i + CHUNK)) {
+        const normalized = normalizeIndexUrl(raw);
+        if (!normalized) {
+          refused++;
+          continue;
+        }
+        if (!isPubliclyFetchable(normalized)) {
+          this.stats.ssrfBlocked++;
+          refused++;
+          continue;
+        }
+        await addToQueue({
+          url: normalized,
+          priority: 0.9,
+          depth: 0,
+          attempts: 0,
+          followLinks: opts.followLinks ?? false,
+          ...(opts.role ? { role: opts.role } : {}),
+          ...(opts.proto ? { proto: opts.proto } : {}),
+        });
+        added++;
+      }
+      onProgress?.(Math.min(i + CHUNK, urls.length), urls.length);
+      // Yield between chunks so a large import never freezes the UI.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    this.wake();
+    this.stats.queueSize = await getQueueSize();
+    this.emitStats();
+    return { added, refused };
   }
 
   /**
@@ -376,6 +435,7 @@ export class CrawlerEngine {
    * Returns the chosen seed URL.
    */
   async scoutRandom(mode?: CrawlMode): Promise<string | null> {
+    await refreshCorpus();
     const seed = pickRandomSeed();
     if (!seed) return null;
     await this.seedUrl(seed);
@@ -412,6 +472,7 @@ export class CrawlerEngine {
    * fresh bundle. Returns the seeds queued.
    */
   async startScoutBundle(): Promise<string[]> {
+    await refreshCorpus();
     const seeds = pickRandomSeedBundle(SCOUT_BUNDLE_SIZE);
     if (seeds.length === 0) return [];
     this.explorer = true;
@@ -430,6 +491,7 @@ export class CrawlerEngine {
    */
   async startExplorer(): Promise<string | null> {
     this.explorer = true;
+    await refreshCorpus();
     const seed = pickRandomSeed();
     if (!seed) return null;
     await this.seedUrl(seed);
@@ -468,6 +530,7 @@ export class CrawlerEngine {
           if (this.explorer && !this.pickingSeed) {
             this.pickingSeed = true;
             try {
+              await refreshCorpus();
               const seeds = pickRandomSeedBundle(SCOUT_BUNDLE_SIZE);
               if (seeds.length > 0) {
                 this.session = { pages: 0, discovered: 0, feeds: 0, sitemaps: 0 };
@@ -768,6 +831,10 @@ export class CrawlerEngine {
       // Extension registry (spec §9.2): a browser crawler only ever sees clearnet.
       network: 'clearnet',
       ...(platform ? { platform } : {}),
+      // Capability-discovery tags (spec v1.3 §9.2) — carried from a service
+      // submission; absent for ordinary pages.
+      ...(job.role ? { role: job.role } : {}),
+      ...(job.proto ? { proto: job.proto } : {}),
       type: platform === 'github' || platform === 'gitlab' ? 'repository' : 'page',
     })
       .then((published) => {
@@ -785,7 +852,7 @@ export class CrawlerEngine {
     this.trackPublish(publishPromise);
 
     // --- Discovery: feeds -------------------------------------------------
-    if (this.settings.followFeeds && parsed.feeds.length > 0) {
+    if (job.followLinks !== false && this.settings.followFeeds && parsed.feeds.length > 0) {
       for (const feed of parsed.feeds.slice(0, 2)) {
         if (this.followedFeeds.has(feed.url)) continue;
         this.followedFeeds.add(feed.url);
@@ -794,7 +861,7 @@ export class CrawlerEngine {
     }
 
     // --- Discovery: sitemaps ----------------------------------------------
-    if (this.settings.followSitemaps) {
+    if (job.followLinks !== false && this.settings.followSitemaps) {
       const origin = new URL(job.url).origin;
       if (!this.probedSitemaps.has(origin)) {
         this.probedSitemaps.add(origin);
@@ -806,7 +873,7 @@ export class CrawlerEngine {
     // Only when content changed (or this is a first crawl): re-queueing the
     // same neighborhood on every unchanged recrawl would burn the budget
     // for zero new information.
-    if (job.depth < this.settings.maxDepth && (changed || !isRecrawl)) {
+    if (job.followLinks !== false && job.depth < this.settings.maxDepth && (changed || !isRecrawl)) {
       const maxLinks = this.settings.ecoMode ? 5 : 10;
       let added = 0;
       for (const link of parsed.links.slice(0, maxLinks)) {

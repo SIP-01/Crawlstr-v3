@@ -4,7 +4,7 @@ import 'fake-indexeddb/auto';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CrawlerEngine } from './engine';
-import { getQueueSize, initDB, clearQueue } from './queue';
+import { getQueueSize, getNextJob, initDB, clearQueue } from './queue';
 import { setRelayPublisher } from './publisher';
 import { recordFetch, resetMeter } from './meter';
 import { DEFAULT_SETTINGS } from './types';
@@ -248,6 +248,50 @@ describe('dispatch regression: zero-throughput self-deferral (v3.0.0)', () => {
     expect(crawlSpy).toHaveBeenCalled();
     await engine.stop();
   }, 30_000);
+});
+
+describe('seed metadata + bulk import (lists & services)', () => {
+  beforeEach(async () => {
+    await initDB();
+    await clearQueue();
+  });
+
+  it('seedUrl carries role/proto/followLinks into the queued job', async () => {
+    const engine = new CrawlerEngine();
+    await engine.init();
+    await engine.seedUrl('https://service-meta.example.com/', 1.0, {
+      role: 'tool',
+      proto: 'mcp',
+      followLinks: false,
+    });
+    const job = await getNextJob();
+    expect(job?.url).toBe('https://service-meta.example.com/');
+    expect(job?.role).toBe('tool');
+    expect(job?.proto).toBe('mcp');
+    expect(job?.followLinks).toBe(false);
+  });
+
+  it('importUrls queues public URLs, refuses non-public/invalid ones, and tags the jobs', async () => {
+    const engine = new CrawlerEngine();
+    await engine.init();
+    const result = await engine.importUrls(
+      [
+        'https://import-a.example.com/',
+        'https://import-b.example.com/',
+        'http://127.0.0.1/secret',
+        'not-a-url',
+      ],
+      { role: 'api', proto: 'http' },
+    );
+    expect(result.added).toBe(2);
+    expect(result.refused).toBe(2);
+    expect(await getQueueSize()).toBe(2);
+
+    const job = await getNextJob();
+    expect(job?.role).toBe('api');
+    expect(job?.proto).toBe('http');
+    expect(job?.followLinks).toBe(false);
+  });
 });
 
 /**

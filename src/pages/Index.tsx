@@ -123,7 +123,7 @@ const Index = () => {
                 step: '1',
                 icon: Search,
                 title: 'Seed or Scout',
-                desc: 'Add a URL — or press Scout Random and it queues 5 fresh corners and goes',
+                desc: 'Add a URL or import a link list — or press Scout Random for 5 fresh corners from your lists',
               },
               {
                 step: '2',

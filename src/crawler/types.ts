@@ -10,6 +10,13 @@ export interface CrawlJob {
   attempts: number;
   lastAttempt?: number;
   nextAttempt?: number;
+  /** Capability-discovery tags (spec v1.3 §9.2) carried from a service
+   *  submission — observations of this URL are emitted with them. */
+  role?: string;
+  proto?: string;
+  /** false = index this URL only; don't follow its links/feeds/sitemaps.
+   *  Imported lists and service submissions use false. */
+  followLinks?: boolean;
 }
 
 export interface ParsedPage {

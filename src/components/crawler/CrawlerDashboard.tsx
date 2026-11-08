@@ -49,6 +49,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { CrawlstrLogo } from '@/components/crawler/CrawlstrLogo';
+import { ListsPanel } from '@/components/crawler/ListsPanel';
 import { RelayManager } from '@/components/crawler/RelayManager';
 import { useCrawler } from '@/hooks/useCrawler';
 import { cn } from '@/lib/utils';
@@ -97,6 +98,10 @@ export function CrawlerDashboard() {
     start,
     stop,
     seedUrl,
+    importUrls,
+    refreshLists,
+    publishCapability,
+    withdrawCapability,
     toggleScout,
     clearAll,
     updateSettings,
@@ -191,15 +196,15 @@ export function CrawlerDashboard() {
         </CardHeader>
 
         <CardContent className="pt-0 space-y-4">
-          {/* Random Scout — ONE control: press to queue 5 fresh curated seeds
-              and crawl until stopped; press again to stop; press once more
-              for a fresh bundle. */}
+          {/* Random Scout — ONE control: press to queue 5 fresh seeds from
+              the user's lists and crawl until stopped; press again to stop;
+              press once more for a fresh bundle. */}
           <div className="space-y-3">
             <Button
               size="lg"
               variant={isRunning ? 'destructive' : 'outline'}
               onClick={() => toggleScout()}
-              disabled={!initialized}
+              disabled={!initialized || (!isRunning && seedCount === 0)}
               className={cn(
                 'w-full gap-2',
                 !isRunning && 'border-primary/40 hover:bg-primary/10 hover:text-primary',
@@ -218,10 +223,20 @@ export function CrawlerDashboard() {
               )}
             </Button>
             <p className="text-xs text-center text-muted-foreground">
-              Each press queues <span className="font-medium text-foreground">5 fresh starting points</span>{' '}
-              from {seedCount.toLocaleString()} curated seeds across {categories.length} categories
-              {scoutedCount > 0 && ` · you've scouted ${scoutedCount}`} — then keeps finding new
-              corners until you stop it.
+              {seedCount > 0 ? (
+                <>
+                  Each press queues <span className="font-medium text-foreground">5 fresh starting points</span>{' '}
+                  from {seedCount.toLocaleString()} links across {categories.length}{' '}
+                  {categories.length === 1 ? 'list' : 'lists'}
+                  {scoutedCount > 0 && ` · you've scouted ${scoutedCount}`} — then keeps finding new
+                  corners until you stop it.
+                </>
+              ) : (
+                <>
+                  Add a link list in the <span className="font-medium text-foreground">Lists</span> tab
+                  to enable Random Scout — it picks fresh corners from your own lists.
+                </>
+              )}
             </p>
           </div>
         </CardContent>
@@ -240,7 +255,8 @@ export function CrawlerDashboard() {
               <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
                 The queue is empty — the scout has nothing to crawl yet. Add a
                 seed URL in the <span className="font-medium text-foreground">Seed URLs</span> tab,
-                or stop and press <span className="font-medium text-foreground">Explore a random corner of the web</span>.
+                import a list in the <span className="font-medium text-foreground">Lists</span> tab,
+                or stop and press <span className="font-medium text-foreground">Scout random corners of the web</span>.
               </div>
             )}
             <p className="text-xs text-muted-foreground">
@@ -458,8 +474,12 @@ export function CrawlerDashboard() {
 
       {/* Tabs for Seed / History / Settings */}
       <Tabs defaultValue="seed" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="seed">Seed URLs</TabsTrigger>
+          <TabsTrigger value="lists">
+            <Link2 className="h-4 w-4 mr-1 hidden sm:inline" />
+            Lists
+          </TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
           <TabsTrigger value="settings">
             <Settings2 className="h-4 w-4 mr-1" />
@@ -547,6 +567,19 @@ export function CrawlerDashboard() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Lists Tab — bring-your-own link lists + service submissions */}
+        <TabsContent value="lists">
+          <ListsPanel
+            ready={initialized}
+            isRunning={isRunning}
+            onStart={() => start()}
+            onIndexList={importUrls}
+            onListsChanged={refreshLists}
+            onPublishCapability={publishCapability}
+            onWithdrawCapability={withdrawCapability}
+          />
         </TabsContent>
 
         {/* History Tab */}

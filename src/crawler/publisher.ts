@@ -1,6 +1,7 @@
 /**
  * Index publisher — signs and publishes SIP-01 web index observations
- * (kind 39697) and crawler node heartbeats (kind 16919).
+ * (kind 39697), crawler node heartbeats (kind 16919), and ORBSTR capability
+ * announcements (kind 39698).
  * Canonical spec: https://github.com/NostrDanish/SIP-01
  * (public/spec/SIP-01.md, v1.3).
  *
@@ -22,6 +23,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 
 import { getIndexerIdentity, getIndexerSecretKey } from './indexerIdentity';
 import { buildIndexEvent, normalizeIndexUrl, type IndexObservationInput } from './webIndex';
+import { buildCapabilityEvent, withdrawnEvent, type CapabilityInput } from './capability';
 import { getHeartbeatRelays, getIndexPublishRelays } from './relays';
 import { enqueueOutbox, flushOutbox } from './queue';
 
@@ -209,5 +211,90 @@ export function getIndexerInfo(): { pubkeyHex: string; npub: string } {
   return {
     pubkeyHex: identity.pubkeyHex,
     npub: identity.npub,
+  };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Capability announcements (kind 39698, ORBSTR companion)                   */
+/* ------------------------------------------------------------------------ */
+
+export interface CapabilityPublishResult {
+  /** NIP-01 addressable coordinate: 39698:<pubkey>:<d>. */
+  coordinate: string;
+  eventId: string;
+  /** Relays that accepted the event (0 = nothing accepted it). */
+  delivered: number;
+}
+
+/**
+ * Capability fan-out is deliberately ISOLATED from observation relay-health
+ * accounting: a relay that validates kind 39697 may policy-reject 39698
+ * ("kind not allowed"), and that must never gate the relay for ordinary
+ * observations. Best-effort, no gating, no outbox — the UI reports the
+ * delivered count and the user can retry.
+ */
+async function publishCapabilityToRelays(signedEvent: NostrEvent): Promise<number> {
+  if (!relayPublishFn) {
+    console.debug('[Crawler] No relay publisher configured. Would publish capability to:', getIndexPublishRelays());
+    return 0;
+  }
+  const results = await Promise.allSettled(
+    getIndexPublishRelays().map((url) => relayPublishFn!(url, signedEvent)),
+  );
+  return results.filter((r) => r.status === 'fulfilled').length;
+}
+
+/**
+ * Build, sign, and publish a kind 39698 capability announcement for a
+ * service the user owns. Signed by this device's indexer identity — the
+ * same pseudonymous key that signs observations.
+ */
+export async function publishCapabilityEvent(
+  input: CapabilityInput,
+): Promise<CapabilityPublishResult | null> {
+  const template = buildCapabilityEvent(input);
+  if (!template) return null;
+
+  const signedEvent = finalizeEvent(
+    {
+      kind: template.kind,
+      created_at: template.created_at,
+      tags: template.tags,
+      content: template.content,
+    },
+    getIndexerSecretKey(),
+  );
+
+  const delivered = await publishCapabilityToRelays(signedEvent);
+  return {
+    coordinate: `39698:${getIndexerIdentity().pubkeyHex}:${input.id.trim().toLowerCase()}`,
+    eventId: signedEvent.id,
+    delivered,
+  };
+}
+
+/**
+ * Withdraw a capability announcement: publish a replacement with the same
+ * `d` and ["status","withdrawn"] (the addressable update — not a delete).
+ */
+export async function withdrawCapabilityListing(id: string): Promise<CapabilityPublishResult | null> {
+  const template = withdrawnEvent(id);
+  if (!template) return null;
+
+  const signedEvent = finalizeEvent(
+    {
+      kind: template.kind,
+      created_at: template.created_at,
+      tags: template.tags,
+      content: template.content,
+    },
+    getIndexerSecretKey(),
+  );
+
+  const delivered = await publishCapabilityToRelays(signedEvent);
+  return {
+    coordinate: `39698:${getIndexerIdentity().pubkeyHex}:${id}`,
+    eventId: signedEvent.id,
+    delivered,
   };
 }

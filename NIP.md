@@ -29,9 +29,11 @@ specification v1.3** — [github.com/NostrDanish/SIP-01](https://github.com/Nost
 |--------|------|------|--------|
 | Web Index Observation (SIP-01) | **39697** | addressable | **Written** by Crawlstr |
 | Crawler node heartbeat | **16919** | replaceable | **Written** by Crawlstr |
+| Capability announcement (ORBSTR) | **39698** | addressable | **Written** by Crawlstr (service submissions only) |
 
-Crawlstr is a **pure SIP-01 publisher** for observations — it does NOT write
-community submissions (kind 30078) or query caches. Kind 16919 is the shared
+Crawlstr publishes SIP-01 observations and, for user-submitted services,
+ORBSTR capability announcements (kind 39698). It does NOT write community
+submissions (kind 30078) or query caches. Kind 16919 is the shared
 crawler-network health event (schema: Indexstr's
 [`src/crawler/heartbeat.ts`](https://github.com/NostrDanish/indxestr/blob/main/src/crawler/heartbeat.ts),
 consumed read-only by the [SIP-01 site](https://github.com/NostrDanish/SIP-01)
@@ -149,6 +151,45 @@ public metadata."*
 - **Addressable** — re-crawling the same URL replaces the previous observation
   (one slot per indexer per URL).
 
+### Kind 39698 — Capability Announcement (ORBSTR companion)
+
+When a user submits their own service through the dashboard (**Lists → Submit
+your service**), Crawlstr publishes a kind 39698 capability announcement so
+agents can discover the service. The same submission also queues the service's
+pages as observations **carrying the `role`/`proto` tags** (spec v1.3 §9.2), so
+the index itself reflects what those pages are.
+
+```json
+{
+  "kind": 39698,
+  "pubkey": "<device indexer pubkey, hex>",
+  "created_at": 1786250000,
+  "content": "{\"name\":\"Echo Tool\",\"summary\":\"Returns text. Free.\"}",
+  "tags": [
+    ["d", "echo-tool"],
+    ["v", "1"],
+    ["role", "tool"],
+    ["proto", "mcp"],
+    ["price", "free"],
+    ["endpoint", "https://echo.example.com/mcp"],
+    ["t", "echo"],
+    ["alt", "Capability: Echo Tool"]
+  ]
+}
+```
+
+- `d` — stable listing id (slug of the name). Addressable: republishing replaces
+  the listing; withdrawal publishes a replacement with the same `d` and
+  `["status","withdrawn"]` (the event is not deleted).
+- `role` / `proto` / `price` / `endpoint` — the discovery surface; `proto` may
+  repeat for multi-protocol services. Schema: ORBSTR `spec/CAPABILITY.md`.
+- **Fan-out is best-effort and isolated**: relays that validate kind 39697 may
+  policy-reject 39698 ("kind not allowed"); a rejection never affects that
+  relay's health for ordinary observations, and the dashboard reports the
+  delivered count.
+- Signed by the same per-device indexer key as observations — never the user's
+  personal Nostr identity.
+
 ### Publisher behavior: adaptive freshness recrawls (v2)
 
 Crawlstr v2 nodes keep an index, not a snapshot. Every successfully crawled
@@ -179,7 +220,7 @@ Related publisher-side behaviors that never change the wire format:
 | Feature | 0xSearchstr / UNCAGED | Crawlstr |
 |---------|----------------------|----------|
 | **Trigger** | Search results surfaced by providers | Active web crawling |
-| **Discovery** | Search results from external APIs | Link following from seed URLs |
+| **Discovery** | Search results from external APIs | User link lists + link following from seed URLs |
 | **Depth** | 1 (direct results only) | Configurable (up to 3 by default) |
 | **Rate limiting** | N/A (API-driven) | Per-domain, configurable |
 | **robots.txt** | N/A | Respected (configurable) |

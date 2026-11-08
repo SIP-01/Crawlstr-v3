@@ -4,9 +4,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNostr } from '@nostrify/react';
 import { CrawlerEngine, type SessionSummary } from '@/crawler/engine';
-import { setRelayPublisher, getIndexerInfo } from '@/crawler/publisher';
-import { seedCount, scoutedCount, getCategories, categoryOf } from '@/crawler/seeds';
+import { setRelayPublisher, getIndexerInfo, publishCapabilityEvent, withdrawCapabilityListing, type CapabilityPublishResult } from '@/crawler/publisher';
+import { seedCount, scoutedCount, getCategories, categoryOf, refreshCorpus } from '@/crawler/seeds';
 import { CRAWL_MODES, type CrawlMode, type CrawlerStats, type CrawlerSettings } from '@/crawler/types';
+import type { CapabilityInput } from '@/crawler/capability';
 
 export interface ScoutPreview {
   url: string;
@@ -51,11 +52,15 @@ export function useCrawler() {
     status: 'fetched' | 'observed' | 'failed';
   }>>([]);
   const [indexerInfo, setIndexerInfo] = useState<{ pubkeyHex: string; npub: string } | null>(null);
+  // Bumped whenever the user's link lists change — re-renders seedCount/categories.
+  const [, setListsVersion] = useState(0);
 
   // Initialize engine and indexer identity
   useEffect(() => {
     const engine = new CrawlerEngine();
-    engine.init().then(() => {
+    engine.init().then(async () => {
+      // Hydrate the Random Scout corpus from the user's saved lists.
+      await refreshCorpus();
       engineRef.current = engine;
       setInitialized(true);
       setStats(engine.getStats());
@@ -138,6 +143,42 @@ export function useCrawler() {
     await engineRef.current.seedUrl(url);
     setCurrentSeed(engineRef.current.getCurrentSeed());
   }, []);
+
+  /** Bulk-import a link list (or service pages) into the crawl queue. */
+  const importUrls = useCallback(
+    async (
+      urls: string[],
+      opts: { role?: string; proto?: string; followLinks?: boolean } = {},
+      onProgress?: (done: number, total: number) => void,
+    ): Promise<{ added: number; refused: number }> => {
+      const engine = engineRef.current;
+      if (!engine) return { added: 0, refused: urls.length };
+      return engine.importUrls(urls, opts, onProgress);
+    },
+    [],
+  );
+
+  /** Re-read the user's lists (after save/delete) and rebuild the scout corpus. */
+  const refreshLists = useCallback(async () => {
+    await refreshCorpus();
+    setListsVersion((v) => v + 1);
+  }, []);
+
+  /** Publish a kind 39698 capability announcement (ORBSTR companion). */
+  const publishCapability = useCallback(
+    async (input: CapabilityInput): Promise<CapabilityPublishResult | null> => {
+      return publishCapabilityEvent(input);
+    },
+    [],
+  );
+
+  /** Withdraw a capability announcement (addressable replacement). */
+  const withdrawCapability = useCallback(
+    async (d: string): Promise<CapabilityPublishResult | null> => {
+      return withdrawCapabilityListing(d);
+    },
+    [],
+  );
 
   /** Random Scout: pick a seed the device hasn't scouted, start crawling. */
   const scoutRandom = useCallback(async (crawlMode?: CrawlMode): Promise<string | null> => {
@@ -268,6 +309,10 @@ export function useCrawler() {
     start,
     stop,
     seedUrl,
+    importUrls,
+    refreshLists,
+    publishCapability,
+    withdrawCapability,
     scoutRandom,
     previewScout,
     confirmScout,

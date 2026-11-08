@@ -192,6 +192,24 @@ describe('buildIndexEvent — spec §5/§6 compliance', () => {
     expect(tag('network')).toBe('clearnet');
   });
 
+  it('emits optional capability-discovery tags (spec v1.3: role, proto)', async () => {
+    const event = await buildIndexEvent({
+      url: 'https://example.com/mcp',
+      title: 'Example MCP server',
+      role: 'Tool', // normalized to lowercase
+      proto: 'mcp',
+    });
+    const tags = event!.tags;
+    expect(tags).toContainEqual(['role', 'tool']);
+    expect(tags).toContainEqual(['proto', 'mcp']);
+  });
+
+  it('omits role/proto when absent (byte-compat with pre-v1.3 publishers)', async () => {
+    const event = await buildIndexEvent({ url: 'https://example.com/page', title: 'Example Page' });
+    expect(event!.tags.find(([n]) => n === 'role')).toBeUndefined();
+    expect(event!.tags.find(([n]) => n === 'proto')).toBeUndefined();
+  });
+
   it('rejects an event with an over-long URL', async () => {
     const longUrl = 'https://example.com/' + 'a'.repeat(2100);
     expect(await buildIndexEvent({ url: longUrl, title: 'Too long' })).toBeNull();
@@ -281,10 +299,18 @@ describe('parseIndexEvent — reader side (spec §18)', () => {
         ['type', 'repository'],
         ['platform', 'github'],
         ['network', 'clearnet'],
+        ['role', 'tool'],
+        ['proto', 'mcp'],
       ],
     });
     const obs = parseIndexEvent(withExt);
-    expect(obs!.extensions).toEqual({ type: 'repository', platform: 'github', network: 'clearnet' });
+    expect(obs!.extensions).toEqual({
+      type: 'repository',
+      platform: 'github',
+      network: 'clearnet',
+      role: 'tool',
+      proto: 'mcp',
+    });
   });
 });
 

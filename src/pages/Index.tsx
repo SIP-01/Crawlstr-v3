@@ -46,7 +46,7 @@ const Index = () => {
             <Globe className="h-3.5 w-3.5" />
             Powered by Nostr
             <span className="text-primary/40">·</span>
-            <span className="text-xs">SIP-01 v1.2 · kind 39697</span>
+            <span className="text-xs">SIP-01 v1.3 · kind 39697</span>
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
             Scout the web. Feed the network.

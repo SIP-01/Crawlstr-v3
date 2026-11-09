@@ -4,7 +4,7 @@
  * At network scale the queue must defend itself: calendar generators,
  * session-id URLs, endless paginators and internal search pages create
  * effectively infinite URL space that would eat the entire crawl budget.
- * Seeds and curated starts bypass these guards (they are the human's
+ * Seeds and imported lists bypass these guards (they are the human's
  * explicit choice); guards apply to *discovered* URLs (link following,
  * feeds, sitemaps).
  *

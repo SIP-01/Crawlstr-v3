@@ -46,7 +46,7 @@ git clone https://github.com/SIP-01/Crawlstr-v3.git && cd Crawlstr-v3
 npm install && npm run dev
 ```
 
-Open the printed URL → paste a seed URL (or hit **Random Scout**) → **Start Crawling**.
+Open the printed URL → paste a seed URL, import a link list, or hit **Random Scout** → **Start Crawling**.
 
 **Headless node** — see [`scrapling-node/`](scrapling-node/README.md):
 
@@ -59,7 +59,7 @@ docker compose up -d        # or: pip install -r requirements.txt && python -m s
 
 ```mermaid
 flowchart TD
-    A[Seed URL / Random Scout bundle] --> B[Admission gate<br>SSRF guard · trap filters · robots.txt]
+    A[Seed URL · link list · Random Scout bundle] --> B[Admission gate<br>SSRF guard · trap filters · robots.txt]
     B --> C[Fetch<br>browser: fetch/proxy · node: Scrapling tier ladder]
     C --> D[Parse<br>title · description · links · language]
     D --> E[SHA-256 hash<br>dedup + change detection]
@@ -88,11 +88,20 @@ flowchart TD
 
 `d` = URL identity (same across every indexer → independent-observation count) · `x` = content agreement hash · full schema in [NIP.md](NIP.md) and the [canonical spec](https://github.com/NostrDanish/SIP-01/blob/main/public/spec/SIP-01.md).
 
+## Bring your own links (and services)
+
+The app ships **no bundled link lists** — the corpus is yours.
+
+- **Lists tab** — paste links or upload a file (.txt, .csv, .json — any text with URLs in it). Lists are saved on this device (IndexedDB), normalized and deduped per SIP-01 §7, and indexed only when you press **Index now**. The list *is* the crawl plan: links are not followed from its pages unless you enable it.
+- **Random Scout** draws its starting points from your lists — fresh-first, then rare, category-weighted, stale, random.
+- **Submit your service** — publishes a kind 39698 capability announcement (ORBSTR) signed by your device indexer key, and queues your service pages as observations carrying `role`/`proto` tags. Withdraw replaces the listing with a "withdrawn" status.
+
 ## Why it's different
 
 Most "decentralized search" projects still run centralized crawlers. Crawlstr makes **every node a crawler** — opt-in, transparent, resource-aware.
 
-- 🎲 **Random Scout** — one button: 5 curated seed bundles, weighted toward fresh/rare corners of the web
+- 🎲 **Random Scout** — one button: 5 fresh starting points from *your* lists, weighted toward fresh/rare corners of the web
+- 📋 **Bring your own links** — paste or upload link lists (.txt/.csv/.json); index them on demand. Service owners can submit a service: its pages get indexed with `role`/`proto` tags and a **kind 39698** capability listing goes out so agents can discover it
 - 🔁 **Adaptive freshness** — changed → recrawl in 24h, unchanged → backs off to 30d; every recrawl is a liveness signal
 - 🕵️ **Pseudonymous by design** — per-device indexer keypair, never your Nostr identity; events carry page metadata, never queries
 - 🐌 **Polite to a fault** — robots.txt, ≤1 in-flight per domain, 5–8s pacing, crawl-trap guards, 7-day negative cache
@@ -135,9 +144,9 @@ Source tags: v1 `crawlstr/1` · v2 `crawlstr/v2` · v3 `crawlstr/v3` — all val
 | Project | Role |
 |---|---|
 | **Crawlstr v3** (this) | Lightweight scout → SIP-01 publisher |
-| [Indexstr v3](https://github.com/SIP-01/indexstr-v3) | Distributed indexing network w/ curated collections + sharding |
+| [Indexstr v3](https://github.com/SIP-01/indexstr-v3) | Distributed indexing network w/ user link lists + sharding |
 | [SIP-01](https://github.com/NostrDanish/SIP-01) | Canonical spec + explorer |
-| [ORBSTR](https://github.com/SIP-01/Orbstr) | Agent/tool directory — kind 39698 capability announcements; observations may carry `role`/`proto`/`a` (spec v1.3) |
+| [ORBSTR](https://github.com/SIP-01/Orbstr) | Agent/tool directory — kind 39698 capability announcements (Crawlstr publishes these for submitted services); observations may carry `role`/`proto`/`a` (spec v1.3) |
 | [0xSearchstr](https://github.com/NostrDanish/0xSearchstr) · [0xPresearchstr](https://github.com/NostrDanish/0xPresearchstr) · [UNCAGED](https://github.com/NostrDanish/UNCAGED-ENGINE) | Search engines → SIP-01 readers |
 
 **Crawlstr finds. Indexstr maintains. Nostr distributes. Searchstr searches.**

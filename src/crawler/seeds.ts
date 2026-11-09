@@ -1,16 +1,16 @@
 /**
- * Random Scout seed selection engine.
+ * Random Scout seed selection engine (v2 — user lists).
  *
- * The corpus lives in src/data/seeds/*.txt — one category per file — so
- * improving the dataset never means touching crawler logic. This module is
- * only the selection algorithm.
+ * The corpus is the union of the user's saved link lists (lists.ts) — the
+ * app ships no bundled seeds. Lists live in IndexedDB; refreshCorpus()
+ * loads them into an in-memory corpus so selection itself stays synchronous.
  *
  * Selection is a weighted mix of strategies (the point is long-tail
  * coverage, not uniform randomness over a fixed list):
  *
  *   40%  fresh      — never picked by this device
  *   25%  rare       — picked least often by this device
- *   15%  category   — from the category this device has explored least
+ *   15%  category   — from the list this device has explored least
  *   10%  stale      — not picked for the longest time
  *   10%  random     — pure randomness
  *
@@ -20,16 +20,7 @@
  */
 
 import { normalizeIndexUrl } from './webIndex';
-
-import nostrTxt from '@/data/seeds/nostr.txt?raw';
-import bitcoinTxt from '@/data/seeds/bitcoin.txt?raw';
-import devTxt from '@/data/seeds/dev.txt?raw';
-import scienceTxt from '@/data/seeds/science.txt?raw';
-import booksTxt from '@/data/seeds/books.txt?raw';
-import musicTxt from '@/data/seeds/music.txt?raw';
-import gamesTxt from '@/data/seeds/games.txt?raw';
-import opendataTxt from '@/data/seeds/opendata.txt?raw';
-import indieTxt from '@/data/seeds/indie.txt?raw';
+import { getListsSync, loadLists } from './lists';
 
 export interface SeedCategory {
   id: string;
@@ -37,64 +28,57 @@ export interface SeedCategory {
   urls: string[];
 }
 
-const CATEGORIES: Array<{ id: string; label: string; raw: string }> = [
-  { id: 'nostr', label: 'Nostr', raw: nostrTxt },
-  { id: 'bitcoin', label: 'Bitcoin & Open Money', raw: bitcoinTxt },
-  { id: 'dev', label: 'Dev & Awesome Lists', raw: devTxt },
-  { id: 'science', label: 'Science & Education', raw: scienceTxt },
-  { id: 'books', label: 'Books & Archives', raw: booksTxt },
-  { id: 'music', label: 'Music & Culture', raw: musicTxt },
-  { id: 'games', label: 'Games', raw: gamesTxt },
-  { id: 'opendata', label: 'Open Data & Infrastructure', raw: opendataTxt },
-  { id: 'indie', label: 'Indie Web & Blogs', raw: indieTxt },
-];
-
-/* ------------------------------------------------------------------ */
-/* Corpus                                                              */
-/* ------------------------------------------------------------------ */
-
 interface SeedRecord {
   url: string;
   categoryId: string;
 }
 
-let cachedCorpus: SeedRecord[] | null = null;
+let cachedCorpus: SeedRecord[] = [];
 
-function getCorpus(): SeedRecord[] {
-  if (cachedCorpus) return cachedCorpus;
+/**
+ * (Re)build the in-memory corpus from the user's saved lists. Cheap to call
+ * repeatedly — lists.ts caches its IndexedDB read, so this only re-scans.
+ * Call it on app start and after any list mutation.
+ */
+export async function refreshCorpus(): Promise<void> {
+  await loadLists();
 
   const seen = new Set<string>();
   const corpus: SeedRecord[] = [];
 
-  for (const cat of CATEGORIES) {
-    for (const line of cat.raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const normalized = normalizeIndexUrl(trimmed);
+  for (const list of getListsSync()) {
+    for (const url of list.urls) {
+      const normalized = normalizeIndexUrl(url);
       if (normalized && !seen.has(normalized)) {
         seen.add(normalized);
-        corpus.push({ url: normalized, categoryId: cat.id });
+        corpus.push({ url: normalized, categoryId: list.id });
       }
     }
   }
 
   cachedCorpus = corpus;
-  return corpus;
 }
 
-/** Categories that actually have seeds, with counts. */
+function getCorpus(): SeedRecord[] {
+  return cachedCorpus;
+}
+
+/** Lists that actually have seeds, with counts. */
 export function getCategories(): Array<{ id: string; label: string; count: number }> {
-  const corpus = getCorpus();
-  return CATEGORIES
-    .map((c) => ({ id: c.id, label: c.label, count: corpus.filter((s) => s.categoryId === c.id).length }))
+  return getListsSync()
+    .map((list) => ({
+      id: list.id,
+      label: list.name,
+      count: cachedCorpus.filter((s) => s.categoryId === list.id).length,
+    }))
     .filter((c) => c.count > 0);
 }
 
-/** Category label for a URL, if it's a known seed. */
+/** List name for a URL, if it's a known seed. */
 export function categoryOf(url: string): string | undefined {
-  const record = getCorpus().find((s) => s.url === url);
+  const record = cachedCorpus.find((s) => s.url === url);
   if (!record) return undefined;
-  return CATEGORIES.find((c) => c.id === record.categoryId)?.label;
+  return getListsSync().find((l) => l.id === record.categoryId)?.name;
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,7 +170,7 @@ function selectSeed(corpus: SeedRecord[], history: History): SeedRecord {
     }
 
     case 'category': {
-      // Explore the least-explored category.
+      // Explore the least-explored list.
       const catCounts = new Map<string, number>();
       for (const s of corpus) {
         catCounts.set(s.categoryId, (catCounts.get(s.categoryId) ?? 0) + (history[s.url]?.n ?? 0));
@@ -226,7 +210,8 @@ export function previewRandomSeed(categoryId?: string): { url: string; category:
   if (corpus.length === 0) return null;
 
   const record = selectSeed(corpus, readHistory());
-  return { url: record.url, category: CATEGORIES.find((c) => c.id === record.categoryId)?.label ?? record.categoryId };
+  const label = getListsSync().find((l) => l.id === record.categoryId)?.name ?? 'My list';
+  return { url: record.url, category: label };
 }
 
 /**
@@ -282,7 +267,7 @@ export function pickRandomSeedBundle(count: number = SCOUT_BUNDLE_SIZE): string[
 /* Stats for the UI                                                    */
 /* ------------------------------------------------------------------ */
 
-/** Number of distinct seeds available. */
+/** Number of distinct seeds available (across the user's lists). */
 export function seedCount(): number {
   return getCorpus().length;
 }

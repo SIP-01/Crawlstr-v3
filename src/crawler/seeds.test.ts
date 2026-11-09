@@ -1,4 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+// IndexedDB is not part of jsdom — fake-indexeddb provides a real
+// implementation so the user-list corpus loads against real code.
+import 'fake-indexeddb/auto';
+
+import { beforeEach, describe, expect, it } from 'vitest';
+import { deleteList, loadLists, saveList } from './lists';
 import {
   getCategories,
   seedCount,
@@ -9,60 +14,78 @@ import {
   pickRandomSeedBundle,
   commitSeed,
   categoryOf,
+  refreshCorpus,
   SCOUT_BUNDLE_SIZE,
 } from './seeds';
 
-// The seed engine reads history from localStorage. jsdom provides a real one;
-// clear it before each test so selections don't leak between cases.
-beforeEach(() => {
+const LIST_A = Array.from({ length: 40 }, (_, i) => `https://alpha-site-${i}.example.com/page-${i}`);
+const LIST_B = Array.from({ length: 30 }, (_, i) => `https://beta-site-${i}.example.com/post-${i}`);
+
+// The seed engine reads history from localStorage (jsdom provides a real
+// one) and its corpus from the user's saved lists. Reset both per test.
+beforeEach(async () => {
   localStorage.clear();
+  for (const list of await loadLists()) await deleteList(list.id);
+  await saveList({ name: 'Alpha', urls: LIST_A, source: 'paste' });
+  await saveList({ name: 'Beta', urls: LIST_B, source: 'paste' });
+  await refreshCorpus();
 });
 
-describe('seed corpus', () => {
-  it('loads a non-trivial corpus across all categories', () => {
+describe('seed corpus (user lists)', () => {
+  it('loads a corpus across the saved lists', () => {
     const categories = getCategories();
-    expect(categories.length).toBeGreaterThan(5);
+    expect(categories).toHaveLength(2);
+    expect(categories.map((c) => c.label).sort()).toEqual(['Alpha', 'Beta']);
     for (const cat of categories) {
       expect(cat.count).toBeGreaterThan(0);
     }
-    expect(seedCount()).toBeGreaterThan(200);
+    expect(seedCount()).toBe(LIST_A.length + LIST_B.length);
   });
 
-  it('normalizes and dedupes URLs', () => {
-    // The corpus is built through SIP-01 normalization, so entries are
-    // canonical https URLs and unique.
-    const categories = getCategories();
-    const all: string[] = categories.flatMap((c) =>
-      // seedCount uses the corpus; we re-derive per-category counts here.
-      Array.from({ length: c.count }, () => ''),
-    );
-    expect(all.length).toBe(seedCount());
+  it('normalizes and dedupes URLs across lists', async () => {
+    await saveList({
+      name: 'Overlap',
+      urls: ['https://alpha-site-0.example.com/page-0', 'https://overlap.example.com/'],
+      source: 'paste',
+    });
+    await refreshCorpus();
+    // The overlapping URL is counted once; the new one adds exactly 1.
+    expect(seedCount()).toBe(LIST_A.length + LIST_B.length + 1);
+  });
+
+  it('is empty until a list is saved', async () => {
+    for (const list of await loadLists()) await deleteList(list.id);
+    await refreshCorpus();
+    expect(seedCount()).toBe(0);
+    expect(getCategories()).toEqual([]);
+    expect(previewRandomSeed()).toBeNull();
+    expect(pickRandomSeed()).toBeNull();
+    expect(pickRandomSeedBundle()).toEqual([]);
   });
 });
 
 describe('previewRandomSeed', () => {
-  it('returns a url + category without recording the selection', () => {
+  it('returns a url + list name without recording the selection', () => {
     const preview = previewRandomSeed();
     expect(preview).not.toBeNull();
     expect(preview!.url).toMatch(/^https:\/\//);
-    expect(preview!.category.length).toBeGreaterThan(0);
+    expect(['Alpha', 'Beta']).toContain(preview!.category);
 
     // Previewing must NOT count as scouting.
     expect(scoutedCount()).toBe(0);
     expect(totalScouts()).toBe(0);
   });
 
-  it('respects a category constraint', () => {
-    const categories = getCategories();
-    const target = categories[0];
+  it('respects a list constraint', () => {
+    const target = getCategories().find((c) => c.label === 'Alpha')!;
     for (let i = 0; i < 10; i++) {
       const preview = previewRandomSeed(target.id);
       expect(preview).not.toBeNull();
-      expect(preview!.category).toBe(target.label);
+      expect(preview!.category).toBe('Alpha');
     }
   });
 
-  it('returns null for an unknown category', () => {
+  it('returns null for an unknown list', () => {
     expect(previewRandomSeed('does-not-exist')).toBeNull();
   });
 });
@@ -93,7 +116,6 @@ describe('commitSeed / pickRandomSeed', () => {
 
   it('history survives a reload (localStorage persistence)', () => {
     const url = pickRandomSeed()!;
-    // Simulate a second session by re-reading from localStorage.
     expect(scoutedCount()).toBe(1);
     commitSeed(url);
     commitSeed(url);

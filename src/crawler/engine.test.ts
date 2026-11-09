@@ -4,7 +4,7 @@ import 'fake-indexeddb/auto';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CrawlerEngine } from './engine';
-import { getQueueSize, initDB, clearQueue } from './queue';
+import { getQueueSize, getNextJob, initDB, clearQueue } from './queue';
 import { setRelayPublisher } from './publisher';
 import { recordFetch, resetMeter } from './meter';
 import { DEFAULT_SETTINGS } from './types';
@@ -248,6 +248,76 @@ describe('dispatch regression: zero-throughput self-deferral (v3.0.0)', () => {
     expect(crawlSpy).toHaveBeenCalled();
     await engine.stop();
   }, 30_000);
+
+  it('a not-yet-due job is picked up the moment it is due — no full-poll stall', async () => {
+    setRelayPublisher(async () => {});
+    const crawlSpy = spyOnCrawlUrl();
+
+    // Simulate the early-timer race: the job sits deferred ~300ms into the
+    // future (as a politeness deferral leaves it). The slot must nap only
+    // until the due time — a flat poll-interval nap here left the job due
+    // in the queue for 30s (the stall this guards).
+    const db = await initDB();
+    await db.put('queue', {
+      url: 'https://due-soon.example.com/',
+      priority: 1,
+      depth: 0,
+      attempts: 0,
+      nextAttempt: Date.now() + 300,
+    });
+
+    const engine = new CrawlerEngine({ respectRobots: false });
+    await engine.init();
+    await engine.start();
+
+    await waitFor(() => crawlSpy.mock.calls.length > 0, 5_000);
+    expect(crawlSpy).toHaveBeenCalled();
+    await engine.stop();
+  }, 15_000);
+});
+
+describe('seed metadata + bulk import (lists & services)', () => {
+  beforeEach(async () => {
+    await initDB();
+    await clearQueue();
+  });
+
+  it('seedUrl carries role/proto/followLinks into the queued job', async () => {
+    const engine = new CrawlerEngine();
+    await engine.init();
+    await engine.seedUrl('https://service-meta.example.com/', 1.0, {
+      role: 'tool',
+      proto: 'mcp',
+      followLinks: false,
+    });
+    const job = await getNextJob();
+    expect(job?.url).toBe('https://service-meta.example.com/');
+    expect(job?.role).toBe('tool');
+    expect(job?.proto).toBe('mcp');
+    expect(job?.followLinks).toBe(false);
+  });
+
+  it('importUrls queues public URLs, refuses non-public/invalid ones, and tags the jobs', async () => {
+    const engine = new CrawlerEngine();
+    await engine.init();
+    const result = await engine.importUrls(
+      [
+        'https://import-a.example.com/',
+        'https://import-b.example.com/',
+        'http://127.0.0.1/secret',
+        'not-a-url',
+      ],
+      { role: 'api', proto: 'http' },
+    );
+    expect(result.added).toBe(2);
+    expect(result.refused).toBe(2);
+    expect(await getQueueSize()).toBe(2);
+
+    const job = await getNextJob();
+    expect(job?.role).toBe('api');
+    expect(job?.proto).toBe('http');
+    expect(job?.followLinks).toBe(false);
+  });
 });
 
 /**

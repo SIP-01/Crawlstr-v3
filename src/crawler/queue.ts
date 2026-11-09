@@ -175,6 +175,33 @@ export async function claimNextJob(): Promise<CrawlJob | null> {
   return null;
 }
 
+/**
+ * Ms until the earliest queued job becomes due. 0 when one is due right
+ * now; null when the queue is empty. The slot loop naps exactly this long
+ * (bounded by its poll cap) instead of a flat interval: a deferral sleep
+ * that fires a hair early (Node timers can fire ~1ms before Date.now()
+ * reaches the deadline) must not leave a due job waiting out a full nap.
+ */
+export async function timeUntilNextDueJob(): Promise<number | null> {
+  const database = await initDB();
+  const tx = database.transaction('queue', 'readonly');
+  const index = tx.store.index('by-priority');
+
+  const now = Date.now();
+  let earliest: number | null = null;
+  let cursor = await index.openCursor(null, 'prev');
+  while (cursor) {
+    const job = cursor.value;
+    if (!job.nextAttempt || job.nextAttempt <= now) return 0;
+    const wait = job.nextAttempt - now;
+    if (earliest === null || wait < earliest) earliest = wait;
+    cursor = await cursor.continue();
+  }
+
+  await tx.done;
+  return earliest;
+}
+
 /** True when `url` currently has a queue entry. */
 export async function isQueued(url: string): Promise<boolean> {
   const database = await initDB();

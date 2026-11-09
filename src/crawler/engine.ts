@@ -65,6 +65,7 @@ import {
   getRecentCrawled,
   clearQueue,
   getOutboxSize,
+  timeUntilNextDueJob,
   type CrawledRecord,
 } from './queue';
 import {
@@ -550,7 +551,16 @@ export class CrawlerEngine {
               this.pickingSeed = false;
             }
           }
-          await this.waitForWake(30_000, ac);
+          // Nap only until the earliest deferred job is due (bounded by
+          // the poll cap). A flat 30s nap here stalled the node for 30s
+          // whenever a deferral sleep fired a hair early (Node timers can
+          // fire ~1ms before Date.now() reaches the deadline): the re-claim
+          // found the job not-yet-due, and the slot then slept the full
+          // interval while the job sat due in the queue. The +5ms epsilon
+          // defeats the same early-fire race on the retry.
+          const untilDue = await timeUntilNextDueJob();
+          const nap = untilDue === null ? 30_000 : Math.min(Math.max(untilDue + 5, 50), 30_000);
+          await this.waitForWake(nap, ac);
           continue;
         }
 
@@ -567,7 +577,9 @@ export class CrawlerEngine {
               job.nextAttempt = Date.now() + wait;
               if (job.recrawl) this.recrawlClaims.delete(job.url);
               await addToQueue(job);
-              await this.waitForWake(Math.min(Math.max(wait, 1_000), 30_000), ac);
+              // +5ms: land the retry past the due time even when the timer
+              // fires a millisecond early (see timeUntilNextDueJob).
+              await this.waitForWake(Math.min(Math.max(wait + 5, 1_000), 30_000), ac);
               continue;
             }
             try {
@@ -600,7 +612,9 @@ export class CrawlerEngine {
           // future due-scan can consider it again if the queue drains.
           if (job.recrawl) this.recrawlClaims.delete(job.url);
           await addToQueue(job);
-          await this.waitForWake(Math.min(Math.max(wait, 1_000), 30_000), ac);
+          // +5ms: land the retry past the due time even when the timer
+          // fires a millisecond early (see timeUntilNextDueJob).
+          await this.waitForWake(Math.min(Math.max(wait + 5, 1_000), 30_000), ac);
           continue;
         }
 

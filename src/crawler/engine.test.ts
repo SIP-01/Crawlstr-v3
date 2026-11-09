@@ -248,6 +248,32 @@ describe('dispatch regression: zero-throughput self-deferral (v3.0.0)', () => {
     expect(crawlSpy).toHaveBeenCalled();
     await engine.stop();
   }, 30_000);
+
+  it('a not-yet-due job is picked up the moment it is due — no full-poll stall', async () => {
+    setRelayPublisher(async () => {});
+    const crawlSpy = spyOnCrawlUrl();
+
+    // Simulate the early-timer race: the job sits deferred ~300ms into the
+    // future (as a politeness deferral leaves it). The slot must nap only
+    // until the due time — a flat poll-interval nap here left the job due
+    // in the queue for 30s (the stall this guards).
+    const db = await initDB();
+    await db.put('queue', {
+      url: 'https://due-soon.example.com/',
+      priority: 1,
+      depth: 0,
+      attempts: 0,
+      nextAttempt: Date.now() + 300,
+    });
+
+    const engine = new CrawlerEngine({ respectRobots: false });
+    await engine.init();
+    await engine.start();
+
+    await waitFor(() => crawlSpy.mock.calls.length > 0, 5_000);
+    expect(crawlSpy).toHaveBeenCalled();
+    await engine.stop();
+  }, 15_000);
 });
 
 describe('seed metadata + bulk import (lists & services)', () => {

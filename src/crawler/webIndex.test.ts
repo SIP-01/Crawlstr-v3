@@ -197,11 +197,14 @@ describe('buildIndexEvent — spec §5/§6 compliance', () => {
       url: 'https://example.com/mcp',
       title: 'Example MCP server',
       role: 'Tool', // normalized to lowercase
-      proto: 'mcp',
+      proto: ['mcp', 'http'],
+      capabilityAddress: '39698:' + 'a'.repeat(64) + ':echo-tool',
     });
     const tags = event!.tags;
     expect(tags).toContainEqual(['role', 'tool']);
     expect(tags).toContainEqual(['proto', 'mcp']);
+    expect(tags).toContainEqual(['proto', 'http']);
+    expect(tags).toContainEqual(['a', '39698:' + 'a'.repeat(64) + ':echo-tool']);
   });
 
   it('omits role/proto when absent (byte-compat with pre-v1.3 publishers)', async () => {

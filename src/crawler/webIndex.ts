@@ -65,6 +65,9 @@ const LANG_RE = /^[a-z]{2}$/;
 
 /** ISO 3166-1 alpha-2 country code shape (spec §9.2, `country` tag). */
 const COUNTRY_RE = /^[a-zA-Z]{2}$/;
+const CAPABILITY_ADDRESS_RE = /^39698:[0-9a-f]{64}:[a-z0-9][a-z0-9-]{0,63}$/;
+const CAPABILITY_ROLES = new Set(['agent', 'tool', 'model', 'api', 'compute', 'dataset', 'gateway']);
+const CAPABILITY_PROTOCOLS = new Set(['mcp', 'http', 'contextvm', 'nostr', 'a2a']);
 
 /**
  * Normalize a URL per SIP-01 §7. Implementations across the ecosystem MUST
@@ -156,7 +159,8 @@ export interface IndexObservationInput {
   country?: string;  // ISO 3166-1 alpha-2
   mime?: string;     // document media type
   role?: string;     // service-document role (spec v1.3): agent, tool, model, …
-  proto?: string;    // transport keyword (spec v1.3): mcp, http, contextvm, nostr, a2a
+  proto?: string | string[]; // repeatable transport keywords (spec v1.3)
+  capabilityAddress?: string; // optional a-tag pointer to kind 39698
 }
 
 export interface UnsignedIndexEvent {
@@ -223,6 +227,9 @@ export async function buildIndexEvent(
     ...(input.source
       ? [['source', input.source.trim().slice(0, MAX_SOURCE_LEN)] as string[]]
       : []),
+    ...(input.capabilityAddress && CAPABILITY_ADDRESS_RE.test(input.capabilityAddress)
+      ? [['a', input.capabilityAddress]]
+      : []),
     ...extensionTags(input),
     ['alt', alt],
   ];
@@ -234,9 +241,14 @@ export async function buildIndexEvent(
 function extensionTags(input: IndexObservationInput): string[][] {
   const tags: string[][] = [];
 
-  for (const name of ['type', 'platform', 'category', 'network', 'role', 'proto'] as const) {
+  for (const name of ['type', 'platform', 'category', 'network'] as const) {
     const value = input[name]?.trim().toLowerCase();
     if (value && EXTENSION_VALUE_RE.test(value)) tags.push([name, value]);
+  }
+  if (input.role && CAPABILITY_ROLES.has(input.role)) tags.push(['role', input.role]);
+  const protocols = Array.isArray(input.proto) ? input.proto : input.proto ? [input.proto] : [];
+  for (const value of protocols) {
+    if (CAPABILITY_PROTOCOLS.has(value)) tags.push(['proto', value]);
   }
 
   const country = input.country?.trim();
@@ -272,6 +284,8 @@ export interface IndexObservation {
   source?: string;
   /** Registered extension tags present on the event (spec §9.2). */
   extensions: Record<string, string>;
+  extensionValues?: Record<string, string[]>;
+  capabilityAddress?: string;
   /** Event created_at — the observation time. */
   observedAt: number;
   /** Indexer pubkey (event author) — the real indexer identity (§14). */
@@ -335,10 +349,18 @@ export function parseIndexEvent(event: NostrEvent): IndexObservation | null {
   const published = publishedTag ? parseInt(publishedTag, 10) : NaN;
 
   const extensions: Record<string, string> = {};
+  const extensionValues: Record<string, string[]> = {};
   for (const name of EXTENSION_TAG_NAMES) {
-    const value = getTag(event, name);
-    if (value !== undefined) extensions[name] = value;
+    const values = event.tags.filter(([tagName]) => tagName === name).map(([, value]) => value);
+    if (values.length > 0) {
+      extensions[name] = values[0];
+      extensionValues[name] = values;
+    }
   }
+  const capabilityAddress = event.tags
+    .filter(([name]) => name === 'a')
+    .map(([, value]) => value)
+    .find((value) => CAPABILITY_ADDRESS_RE.test(value));
 
   return {
     d,
@@ -352,6 +374,8 @@ export function parseIndexEvent(event: NostrEvent): IndexObservation | null {
     published: Number.isFinite(published) ? published : undefined,
     source: getTag(event, 'source'),
     extensions,
+    extensionValues,
+    capabilityAddress,
     observedAt: event.created_at,
     indexer: event.pubkey,
     event,

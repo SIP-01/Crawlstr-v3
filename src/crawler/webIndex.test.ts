@@ -197,7 +197,7 @@ describe('buildIndexEvent — spec §5/§6 compliance', () => {
       url: 'https://example.com/mcp',
       title: 'Example MCP server',
       role: 'Tool', // normalized to lowercase
-      proto: ['mcp', 'http'],
+      proto: ['MCP', 'HTTP'],
       capabilityAddress: '39698:' + 'a'.repeat(64) + ':echo-tool',
     });
     const tags = event!.tags;

@@ -245,10 +245,12 @@ function extensionTags(input: IndexObservationInput): string[][] {
     const value = input[name]?.trim().toLowerCase();
     if (value && EXTENSION_VALUE_RE.test(value)) tags.push([name, value]);
   }
-  if (input.role && CAPABILITY_ROLES.has(input.role)) tags.push(['role', input.role]);
+  const role = input.role?.trim().toLowerCase();
+  if (role && CAPABILITY_ROLES.has(role)) tags.push(['role', role]);
   const protocols = Array.isArray(input.proto) ? input.proto : input.proto ? [input.proto] : [];
   for (const value of protocols) {
-    if (CAPABILITY_PROTOCOLS.has(value)) tags.push(['proto', value]);
+    const protocol = value.trim().toLowerCase();
+    if (CAPABILITY_PROTOCOLS.has(protocol)) tags.push(['proto', protocol]);
   }
 
   const country = input.country?.trim();
